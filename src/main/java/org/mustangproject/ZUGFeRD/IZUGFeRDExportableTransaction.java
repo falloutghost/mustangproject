@@ -30,13 +30,14 @@ package org.mustangproject.ZUGFeRD;
 import java.math.BigDecimal;
 import java.util.Date;
 
+import org.mustangproject.ZUGFeRD.entity.IReferencedDocument;
 import org.mustangproject.ZUGFeRD.model.DocumentCodeTypeConstants;
 
 public interface IZUGFeRDExportableTransaction {
 
 	/**
 	 * appears in /rsm:CrossIndustryDocument/rsm:HeaderExchangedDocument/ram:Name
-	 * 
+	 *
 	 * @return Name of document
 	 */
 	default String getDocumentName() {
@@ -117,6 +118,7 @@ public interface IZUGFeRDExportableTransaction {
 
 	IZUGFeRDExportableItem[] getZFItems();
 
+	IReferencedDocument[] getReferencedDocuments();
 
 	/**
 	 * the recipient
@@ -131,7 +133,7 @@ public interface IZUGFeRDExportableTransaction {
 	 * @deprecated use getTradeSettlement
 	 * @return an array of IZUGFeRDTradeSettlementPayment
 	 */
-	default IZUGFeRDTradeSettlementPayment[] getTradeSettlementPayment() {		
+	default IZUGFeRDTradeSettlementPayment[] getTradeSettlementPayment() {
 		return null;
 	}
 	/**
@@ -324,7 +326,7 @@ public interface IZUGFeRDExportableTransaction {
 
 	/**
 	 * get the ID of the BuyerOrderReferencedDocument, which sits in the ApplicableSupplyChainTradeAgreement
-	 * 
+	 *
 	 * @return the ID of the document
 	 */
 	default String getBuyerOrderReferencedDocumentID() {
@@ -334,7 +336,7 @@ public interface IZUGFeRDExportableTransaction {
 
 	/**
 	 * get the issue timestamp of the BuyerOrderReferencedDocument, which sits in the ApplicableSupplyChainTradeAgreement
-	 * 
+	 *
 	 * @return the IssueDateTime in format CCYY-MM-DDTHH:MM:SS
 	 */
 	default String getBuyerOrderReferencedDocumentIssueDateTime() {
@@ -344,7 +346,7 @@ public interface IZUGFeRDExportableTransaction {
 
 	/**
 	 * get the TotalPrepaidAmount located in SpecifiedTradeSettlementMonetarySummation (v1) or SpecifiedTradeSettlementHeaderMonetarySummation (v2)
-	 * 
+	 *
 	 * @return the total sum (incl. VAT) of prepayments, i.e. the difference between GrandTotalAmount and DuePayableAmount
 	 */
 	default BigDecimal getTotalPrepaidAmount() {

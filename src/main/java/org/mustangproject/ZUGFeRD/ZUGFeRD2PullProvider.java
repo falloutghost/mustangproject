@@ -34,6 +34,7 @@ import org.dom4j.DocumentHelper;
 import org.dom4j.io.OutputFormat;
 import org.dom4j.io.XMLWriter;
 import org.mustangproject.XMLTools;
+import org.mustangproject.ZUGFeRD.entity.IReferencedDocument;
 import org.mustangproject.toecount.Toecount;
 
 public class ZUGFeRD2PullProvider implements IXMLProvider, IProfileProvider {
@@ -120,7 +121,7 @@ public class ZUGFeRD2PullProvider implements IXMLProvider, IProfileProvider {
 	public byte[] getXML() {
 
 		byte[] res = zugferdData;
-		
+
 		StringWriter sw = new StringWriter();
 		Document document=null;
 		try {
@@ -137,9 +138,9 @@ public class ZUGFeRD2PullProvider implements IXMLProvider, IProfileProvider {
 		} catch (IOException e) {
 			Logger.getLogger(ZUGFeRD2PullProvider.class.getName()).log(Level.SEVERE, null, e);
 		}
-		
+
 		return res;
-		
+
 	}
 
 	private BigDecimal getTotalPrepaid() {
@@ -150,24 +151,58 @@ public class ZUGFeRD2PullProvider implements IXMLProvider, IProfileProvider {
 		}
 	}
 
-	private BigDecimal getTotalGross() {
-
-		BigDecimal res = getTotal();
-		HashMap<BigDecimal, VATAmount> VATPercentAmountMap = getVATPercentAmountMap();
-		for (BigDecimal currentTaxPercent : VATPercentAmountMap.keySet()) {
-			VATAmount amount = VATPercentAmountMap.get(currentTaxPercent);
-			res = res.add(amount.getCalculated());
+	private BigDecimal getTotalAllowanceAmount() {
+		BigDecimal result = BigDecimal.ZERO;
+		for(IZUGFeRDExportableItem item : trans.getZFItems()) {
+			result = result.add(getAllowancesSum(item));
 		}
-		return res;
+		return result;
 	}
 
-	private BigDecimal getTotal() {
-		BigDecimal res = new BigDecimal(0);
-		for (IZUGFeRDExportableItem currentItem : trans.getZFItems()) {
-			LineCalc lc = new LineCalc(currentItem);
-			res = res.add(lc.getItemTotalNetAmount());
+	private BigDecimal getAllowancesSum(IZUGFeRDExportableItem item) {
+		BigDecimal result = BigDecimal.ZERO;
+		for(IZUGFeRDAllowanceCharge charge: item.getItemAllowances()) {
+			result = result.add(charge.getTotalAmount());
 		}
-		return res;
+		return result;
+	}
+
+	private BigDecimal getNetPriceWithAllowances(IZUGFeRDExportableItem item) {
+		BigDecimal allowancesSum = getAllowancesSum(item);
+		return item.getPrice().subtract(allowancesSum);
+	}
+
+	private BigDecimal getGrossPriceWithAllowances(IZUGFeRDExportableItem item) {
+			BigDecimal netPrice = getNetPriceWithAllowances(item);
+			return getGross(netPrice, item.getProduct().getVATPercent());
+	}
+
+	private BigDecimal getTotalGross() {
+		BigDecimal result = BigDecimal.ZERO;
+		for(IZUGFeRDExportableItem item : trans.getZFItems()) {
+			result = result.add(getGrossPriceWithAllowances(item));
+		}
+		return result;
+	}
+
+	public BigDecimal getGrossPrice(IZUGFeRDExportableItem item) {
+		BigDecimal netPrice = item.getPrice();
+		BigDecimal vatPercentage = item.getProduct().getVATPercent();
+		return getGross(netPrice, vatPercentage);
+	}
+
+	public BigDecimal getGross(BigDecimal net, BigDecimal percentage) {
+		BigDecimal vatAmount = percentage.divide(BigDecimal.valueOf(100));
+		BigDecimal multiplicand = BigDecimal.ONE.add(vatAmount);
+		return net.multiply(multiplicand);
+	}
+
+	private BigDecimal getLineTotal() {
+		BigDecimal result = BigDecimal.ZERO;
+		for(IZUGFeRDExportableItem item : trans.getZFItems()) {
+			result = result.add(getNetPriceWithAllowances(item));
+		}
+		return result;
 	}
 
 	/**
@@ -198,8 +233,8 @@ public class ZUGFeRD2PullProvider implements IXMLProvider, IProfileProvider {
 	public String getProfile() {
 		return "urn:cen.eu:en16931:2017";
 	}
-	
-	
+
+
 
 	@Override
 	public void generateXML(IZUGFeRDExportableTransaction trans) {
@@ -211,7 +246,7 @@ public class ZUGFeRD2PullProvider implements IXMLProvider, IProfileProvider {
 
 		if (paymentTermsDescription==null) {
 			paymentTermsDescription= "Zahlbar ohne Abzug bis " + germanDateFormat.format(trans.getDueDate());
-			
+
 		}
 		if (trans.getPaymentTermDescription()!=null) {
 			paymentTermsDescription=trans.getPaymentTermDescription();
@@ -285,16 +320,22 @@ public class ZUGFeRD2PullProvider implements IXMLProvider, IProfileProvider {
 
 					+ "			<ram:SpecifiedLineTradeAgreement>\n" //$NON-NLS-1$
 					+ "				<ram:GrossPriceProductTradePrice>\n" //$NON-NLS-1$
-					+ "					<ram:ChargeAmount>" + priceFormat(currentItem.getPrice()) //$NON-NLS-1$
+					+ "					<ram:ChargeAmount>" + priceFormat(getGrossPrice(currentItem)) //$NON-NLS-1$
 					+ "</ram:ChargeAmount>\n" //$NON-NLS-1$ //currencyID=\"EUR\"
 					+ "					<ram:BasisQuantity unitCode=\"" + XMLTools.encodeXML(currentItem.getProduct().getUnit()) //$NON-NLS-1$
-					+ "\">1.0000</ram:BasisQuantity>\n" //$NON-NLS-1$
-					// + " <AppliedTradeAllowanceCharge>\n"
-					// + " <ChargeIndicator>false</ChargeIndicator>\n"
-					// + " <ActualAmount currencyID=\"EUR\">0.6667</ActualAmount>\n"
-					// + " <Reason>Rabatt</Reason>\n"
-					// + " </AppliedTradeAllowanceCharge>\n"
-					+ "				</ram:GrossPriceProductTradePrice>\n" //$NON-NLS-1$
+					+ "\">1.0000</ram:BasisQuantity>\n"; //$NON-NLS-1$
+
+
+					for(IZUGFeRDAllowanceCharge charge : currentItem.getItemAllowances()) {
+						xml += "<ram:AppliedTradeAllowanceCharge>\n"
+						 + " <ram:ChargeIndicator><udt:Indicator>false</udt:Indicator></ram:ChargeIndicator>\n"
+						+ " <ram:ActualAmount currencyID=\"EUR\">"+ priceFormat(charge.getTotalAmount()) +"</ram:ActualAmount>\n"
+						 + " <ram:Reason>"+charge.getReason()+"</ram:Reason>\n"
+						 + " </ram:AppliedTradeAllowanceCharge>\n";
+					}
+
+
+			xml += "				</ram:GrossPriceProductTradePrice>\n" //$NON-NLS-1$
 					+ "				<ram:NetPriceProductTradePrice>\n" //$NON-NLS-1$
 					+ "					<ram:ChargeAmount>" + priceFormat(currentItem.getPrice()) //$NON-NLS-1$
 					+ "</ram:ChargeAmount>\n" //$NON-NLS-1$ // currencyID=\"EUR\"
@@ -333,7 +374,7 @@ public class ZUGFeRD2PullProvider implements IXMLProvider, IProfileProvider {
 				+ "				<ram:Name>" + XMLTools.encodeXML(trans.getOwnOrganisationName()) + "</ram:Name>\n"; //$NON-NLS-1$ //$NON-NLS-2$
 
 		if ((trans.getOwnVATID()!=null)&&(trans.getOwnOrganisationName()!=null)) {
-			
+
 			xml = xml + "            <ram:SpecifiedLegalOrganization>\n" + "               <ram:ID schemeID='9930'>"
 					+ XMLTools.encodeXML(trans.getOwnVATID()) + "</ram:ID>\n" + "               <ram:TradingBusinessName>"
 					+ XMLTools.encodeXML(trans.getOwnOrganisationName()) + "</ram:TradingBusinessName>\n"
@@ -389,12 +430,23 @@ public class ZUGFeRD2PullProvider implements IXMLProvider, IProfileProvider {
 				+ "					<ram:ID schemeID=\"VA\">" + XMLTools.encodeXML(trans.getRecipient().getVATID()) + "</ram:ID>\n" //$NON-NLS-1$ //$NON-NLS-2$
 				+ "				</ram:SpecifiedTaxRegistration>\n"; //$NON-NLS-1$
 		}
-		xml += "			</ram:BuyerTradeParty>\n" //$NON-NLS-1$
+		xml += "			</ram:BuyerTradeParty>\n"; //$NON-NLS-1$
 				// + " <BuyerOrderReferencedDocument>\n"
 				// + " <IssueDateTime format=\"102\">20130301</IssueDateTime>\n"
 				// + " <ID>2013-471331</ID>\n"
 				// + " </BuyerOrderReferencedDocument>\n"
-				+ "		</ram:ApplicableHeaderTradeAgreement>\n" //$NON-NLS-1$
+
+		// Rechnungsbegründende Dokumente
+			for(IReferencedDocument document : trans.getReferencedDocuments()) {
+				xml += "<ram:AdditionalReferencedDocument>"
+					+ "		<ram:IssuerAssignedID>"+document.getIssuerAssignedId()+"</ram:IssuerAssignedID>"
+					+ "		<ram:URIID>"+document.getUrl()+"</ram:URIID>"
+					+ "		<ram:TypeCode>"+document.getTypeCode()+"</ram:TypeCode>"
+					+ "		<ram:Name>"+document.getName()+"</ram:Name>"
+					+ "</ram:AdditionalReferencedDocument>";
+			}
+
+			xml	+= "		</ram:ApplicableHeaderTradeAgreement>\n" //$NON-NLS-1$
 				+ "		<ram:ApplicableHeaderTradeDelivery>\n" + "			<ram:ActualDeliverySupplyChainEvent>\n"
 				+ "				<ram:OccurrenceDateTime><udt:DateTimeString format=\"102\">"
 				+ zugferdDateFormat.format(trans.getDeliveryDate()) + "</udt:DateTimeString></ram:OccurrenceDateTime>\n"
@@ -448,7 +500,7 @@ public class ZUGFeRD2PullProvider implements IXMLProvider, IProfileProvider {
 				+ "				<ram:Description>"+
 				paymentTermsDescription
 				+ "</ram:Description>\n";
-		
+
 		if (trans.getTradeSettlement()!=null) {
 			for (IZUGFeRDTradeSettlement payment : trans.getTradeSettlement()) {
 				if(payment!=null) {
@@ -460,25 +512,23 @@ public class ZUGFeRD2PullProvider implements IXMLProvider, IProfileProvider {
 		if(hasDueDate) {
 			xml=xml+"				<ram:DueDateDateTime><udt:DateTimeString format=\"102\">" //$NON-NLS-2$
 					+ zugferdDateFormat.format(trans.getDueDate()) + "</udt:DateTimeString></ram:DueDateDateTime>\n";// 20130704 //$NON-NLS-1$
-			
-		}
-				
 
-	
+		}
+
 		xml = xml + "			</ram:SpecifiedTradePaymentTerms>\n" //$NON-NLS-1$
 				+ "			<ram:SpecifiedTradeSettlementHeaderMonetarySummation>\n" //$NON-NLS-1$
-				+ "				<ram:LineTotalAmount>" + currencyFormat(getTotal()) + "</ram:LineTotalAmount>\n" //$NON-NLS-1$ //$NON-NLS-2$
+				+ "				<ram:LineTotalAmount>" + currencyFormat(getLineTotal()) + "</ram:LineTotalAmount>\n" //$NON-NLS-1$ //$NON-NLS-2$
 																													// currencyID=\"EUR\"
 				+ "				<ram:ChargeTotalAmount>0.00</ram:ChargeTotalAmount>\n" //$NON-NLS-1$ currencyID=\"EUR\"
-				+ "				<ram:AllowanceTotalAmount>0.00</ram:AllowanceTotalAmount>\n" //$NON-NLS-1$ //
+				+ "				<ram:AllowanceTotalAmount>"+currencyFormat(getTotalAllowanceAmount())+"</ram:AllowanceTotalAmount>\n" //$NON-NLS-1$ //
 																								// currencyID=\"EUR\"
 				// + " <ChargeTotalAmount currencyID=\"EUR\">5.80</ChargeTotalAmount>\n"
 				// + " <AllowanceTotalAmount currencyID=\"EUR\">14.73</AllowanceTotalAmount>\n"
-				+ "				<ram:TaxBasisTotalAmount>" + currencyFormat(getTotal()) + "</ram:TaxBasisTotalAmount>\n" //$NON-NLS-1$ //$NON-NLS-2$
+				+ "				<ram:TaxBasisTotalAmount>" + currencyFormat(getLineTotal()) + "</ram:TaxBasisTotalAmount>\n" //$NON-NLS-1$ //$NON-NLS-2$
 																															// //
 																															// currencyID=\"EUR\"
 				+ "				<ram:TaxTotalAmount currencyID=\"EUR\">" //$NON-NLS-1$
-				+ currencyFormat(getTotalGross().subtract(getTotal())) + "</ram:TaxTotalAmount>\n" //$NON-NLS-1$
+				+ currencyFormat(getTotalGross().subtract(getLineTotal())) + "</ram:TaxTotalAmount>\n" //$NON-NLS-1$
 				+ "				<ram:GrandTotalAmount>" + currencyFormat(getTotalGross()) + "</ram:GrandTotalAmount>\n" //$NON-NLS-1$ //$NON-NLS-2$
 																														// //
 																														// currencyID=\"EUR\"
